@@ -1505,3 +1505,254 @@ pub enum JobsRenewInvocationError {
     Domain(RenewError),
     Runtime(RuntimeFailure),
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct JobsGuestClient<'a, H: lenso_guest_sdk::HostImports> {
+    capability: lenso_guest_sdk::GuestCapability<'a, H>,
+}
+
+impl<'a, H: lenso_guest_sdk::HostImports> JobsGuestClient<'a, H> {
+    pub fn from_context(context: &'a lenso_guest_sdk::GuestContext<H>) -> Result<Self, lenso_guest_sdk::GuestError<serde_json::Value>> {
+        context
+            .require(CAPABILITY_ID, DESCRIPTOR_VERSION, &[CLAIM_OPERATION, COMPLETE_OPERATION, ENQUEUE_OPERATION, FAIL_OPERATION, INSPECT_OPERATION, RENEW_OPERATION], &[])
+            .map(|capability| Self { capability })
+    }
+
+    pub fn claim(&self, request: &ClaimRequest) -> Result<ClaimResponse, lenso_guest_sdk::GuestError<ClaimError>> {
+        self.capability.request(CLAIM_OPERATION, request)
+    }
+
+    pub fn complete(&self, request: &CompleteRequest) -> Result<CompleteResponse, lenso_guest_sdk::GuestError<CompleteError>> {
+        self.capability.request(COMPLETE_OPERATION, request)
+    }
+
+    pub fn enqueue(&self, request: &EnqueueRequest) -> Result<EnqueueResponse, lenso_guest_sdk::GuestError<EnqueueError>> {
+        self.capability.request(ENQUEUE_OPERATION, request)
+    }
+
+    pub fn fail(&self, request: &FailRequest) -> Result<FailResponse, lenso_guest_sdk::GuestError<FailError>> {
+        self.capability.request(FAIL_OPERATION, request)
+    }
+
+    pub fn inspect(&self, request: &InspectRequest) -> Result<InspectResponse, lenso_guest_sdk::GuestError<InspectError>> {
+        self.capability.request(INSPECT_OPERATION, request)
+    }
+
+    pub fn renew(&self, request: &RenewRequest) -> Result<RenewResponse, lenso_guest_sdk::GuestError<RenewError>> {
+        self.capability.request(RENEW_OPERATION, request)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct JobsJsonCodec;
+
+impl lenso_runtime_codec::JsonCapabilityCodec for JobsJsonCodec {
+    fn capability_id(&self) -> &'static str { CAPABILITY_ID }
+
+    fn descriptor_version(&self) -> &'static str { DESCRIPTOR_VERSION }
+
+    fn descriptor_digest(&self) -> &'static str { DESCRIPTOR_DIGEST }
+
+    fn request_operations(&self) -> &'static [&'static str] { &[CLAIM_OPERATION, COMPLETE_OPERATION, ENQUEUE_OPERATION, FAIL_OPERATION, INSPECT_OPERATION, RENEW_OPERATION] }
+    fn stream_operations(&self) -> &'static [&'static str] { &[] }
+
+    fn encode_request(&self, operation: &str, request: &dyn std::any::Any) -> Result<serde_json::Value, RuntimeFailure> {
+        match operation {
+            CLAIM_OPERATION => {
+                let value = request.downcast_ref::<ClaimRequest>().ok_or_else(runtime_codec_protocol_failure)?;
+                serde_json::to_value(value).map_err(|_| runtime_codec_protocol_failure())
+            },
+            COMPLETE_OPERATION => {
+                let value = request.downcast_ref::<CompleteRequest>().ok_or_else(runtime_codec_protocol_failure)?;
+                serde_json::to_value(value).map_err(|_| runtime_codec_protocol_failure())
+            },
+            ENQUEUE_OPERATION => {
+                let value = request.downcast_ref::<EnqueueRequest>().ok_or_else(runtime_codec_protocol_failure)?;
+                serde_json::to_value(value).map_err(|_| runtime_codec_protocol_failure())
+            },
+            FAIL_OPERATION => {
+                let value = request.downcast_ref::<FailRequest>().ok_or_else(runtime_codec_protocol_failure)?;
+                serde_json::to_value(value).map_err(|_| runtime_codec_protocol_failure())
+            },
+            INSPECT_OPERATION => {
+                let value = request.downcast_ref::<InspectRequest>().ok_or_else(runtime_codec_protocol_failure)?;
+                serde_json::to_value(value).map_err(|_| runtime_codec_protocol_failure())
+            },
+            RENEW_OPERATION => {
+                let value = request.downcast_ref::<RenewRequest>().ok_or_else(runtime_codec_protocol_failure)?;
+                serde_json::to_value(value).map_err(|_| runtime_codec_protocol_failure())
+            },
+            _ => Err(runtime_codec_unknown_operation(operation)),
+        }
+    }
+
+    fn decode_response(&self, operation: &str, value: serde_json::Value) -> Result<Box<dyn std::any::Any>, RuntimeFailure> {
+        match operation {
+            CLAIM_OPERATION => serde_json::from_value::<ClaimResponse>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            COMPLETE_OPERATION => serde_json::from_value::<CompleteResponse>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            ENQUEUE_OPERATION => serde_json::from_value::<EnqueueResponse>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            FAIL_OPERATION => serde_json::from_value::<FailResponse>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            INSPECT_OPERATION => serde_json::from_value::<InspectResponse>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            RENEW_OPERATION => serde_json::from_value::<RenewResponse>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            _ => Err(runtime_codec_unknown_operation(operation)),
+        }
+    }
+
+    fn decode_domain_error(&self, operation: &str, value: serde_json::Value) -> Result<Box<dyn std::any::Any>, RuntimeFailure> {
+        match operation {
+            CLAIM_OPERATION => serde_json::from_value::<ClaimError>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            COMPLETE_OPERATION => serde_json::from_value::<CompleteError>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            ENQUEUE_OPERATION => serde_json::from_value::<EnqueueError>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            FAIL_OPERATION => serde_json::from_value::<FailError>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            INSPECT_OPERATION => serde_json::from_value::<InspectError>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            RENEW_OPERATION => serde_json::from_value::<RenewError>(value)
+                .map(|value| Box::new(value) as Box<dyn std::any::Any>)
+                .map_err(|_| runtime_codec_protocol_failure()),
+            _ => Err(runtime_codec_unknown_operation(operation)),
+        }
+    }
+
+    fn encode_stream_open(&self, operation: &str, _request: &dyn std::any::Any) -> Result<serde_json::Value, RuntimeFailure> {
+        Err(runtime_codec_unknown_operation(operation))
+    }
+
+    fn encode_stream_message(&self, operation: &str, _message: &dyn std::any::Any) -> Result<serde_json::Value, RuntimeFailure> {
+        Err(runtime_codec_unknown_operation(operation))
+    }
+
+    fn decode_stream_message(&self, operation: &str, _value: serde_json::Value) -> Result<Box<dyn std::any::Any>, RuntimeFailure> {
+        Err(runtime_codec_unknown_operation(operation))
+    }
+
+    fn decode_stream_domain_error(&self, operation: &str, _value: serde_json::Value) -> Result<Box<dyn std::any::Any>, RuntimeFailure> {
+        Err(runtime_codec_unknown_operation(operation))
+    }
+
+    fn invoke_host_request(&self, dependency: lenso_kernel::PluginDependencyHandle, operation: String, request: serde_json::Value, context: InvocationContext) -> lenso_runtime_codec::JsonHostRequestFuture {
+        match operation.as_str() {
+            CLAIM_OPERATION => {
+                let request = serde_json::from_value::<ClaimRequest>(request).map_err(|_| runtime_codec_protocol_failure());
+                Box::pin(async move {
+                    let request = request?;
+                    let handle = dependency.typed::<JobsClaim>()?;
+                    match handle.invoke_with_context(CLAIM_OPERATION, context, request).await? {
+                        Ok(response) => serde_json::to_value(response)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::Success)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                        Err(error) => serde_json::to_value(error)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::DomainError)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                    }
+                })
+            },
+            COMPLETE_OPERATION => {
+                let request = serde_json::from_value::<CompleteRequest>(request).map_err(|_| runtime_codec_protocol_failure());
+                Box::pin(async move {
+                    let request = request?;
+                    let handle = dependency.typed::<JobsComplete>()?;
+                    match handle.invoke_with_context(COMPLETE_OPERATION, context, request).await? {
+                        Ok(response) => serde_json::to_value(response)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::Success)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                        Err(error) => serde_json::to_value(error)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::DomainError)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                    }
+                })
+            },
+            ENQUEUE_OPERATION => {
+                let request = serde_json::from_value::<EnqueueRequest>(request).map_err(|_| runtime_codec_protocol_failure());
+                Box::pin(async move {
+                    let request = request?;
+                    let handle = dependency.typed::<JobsEnqueue>()?;
+                    match handle.invoke_with_context(ENQUEUE_OPERATION, context, request).await? {
+                        Ok(response) => serde_json::to_value(response)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::Success)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                        Err(error) => serde_json::to_value(error)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::DomainError)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                    }
+                })
+            },
+            FAIL_OPERATION => {
+                let request = serde_json::from_value::<FailRequest>(request).map_err(|_| runtime_codec_protocol_failure());
+                Box::pin(async move {
+                    let request = request?;
+                    let handle = dependency.typed::<JobsFail>()?;
+                    match handle.invoke_with_context(FAIL_OPERATION, context, request).await? {
+                        Ok(response) => serde_json::to_value(response)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::Success)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                        Err(error) => serde_json::to_value(error)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::DomainError)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                    }
+                })
+            },
+            INSPECT_OPERATION => {
+                let request = serde_json::from_value::<InspectRequest>(request).map_err(|_| runtime_codec_protocol_failure());
+                Box::pin(async move {
+                    let request = request?;
+                    let handle = dependency.typed::<JobsInspect>()?;
+                    match handle.invoke_with_context(INSPECT_OPERATION, context, request).await? {
+                        Ok(response) => serde_json::to_value(response)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::Success)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                        Err(error) => serde_json::to_value(error)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::DomainError)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                    }
+                })
+            },
+            RENEW_OPERATION => {
+                let request = serde_json::from_value::<RenewRequest>(request).map_err(|_| runtime_codec_protocol_failure());
+                Box::pin(async move {
+                    let request = request?;
+                    let handle = dependency.typed::<JobsRenew>()?;
+                    match handle.invoke_with_context(RENEW_OPERATION, context, request).await? {
+                        Ok(response) => serde_json::to_value(response)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::Success)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                        Err(error) => serde_json::to_value(error)
+                            .map(lenso_runtime_codec::JsonInvocationOutcome::DomainError)
+                            .map_err(|_| runtime_codec_protocol_failure()),
+                    }
+                })
+            },
+            _ => Box::pin(std::future::ready(Err(runtime_codec_unknown_operation(&operation)))),
+        }
+    }
+
+    fn open_host_stream(&self, _dependency: lenso_kernel::PluginStreamDependencyHandle, operation: String, _request: serde_json::Value, _context: InvocationContext) -> lenso_runtime_codec::JsonHostStreamOpenFuture {
+        Box::pin(std::future::ready(Err(runtime_codec_unknown_operation(&operation))))
+    }
+}
+
+fn runtime_codec_protocol_failure() -> RuntimeFailure { RuntimeFailure::ProtocolViolation { capability: CAPABILITY_ID } }
+
+fn runtime_codec_unknown_operation(operation: &str) -> RuntimeFailure {
+    RuntimeFailure::UnknownOperation { capability: CAPABILITY_ID, operation: operation.to_owned() }
+}
