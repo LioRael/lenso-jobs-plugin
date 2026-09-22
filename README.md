@@ -42,6 +42,20 @@ Each keyed Jobs Instance declares its allowed queues and caller Instances. Use s
 
 PostgreSQL is a private persistence Adapter. The Plugin uses `lenso-postgres-kit` to verify its schema during activation; setup and upgrades are explicit operator workflows.
 
+From the Plugin source package, run that workflow without putting the database
+URL in an argument or Plugin configuration:
+
+```sh
+LENSO_JOBS_DATABASE_URL='postgres://...' \
+  cargo run -p lenso-jobs-plugin --example jobs-operator -- setup jobs_email
+LENSO_JOBS_DATABASE_URL='postgres://...' \
+  cargo run -p lenso-jobs-plugin --example jobs-operator -- check jobs_email
+```
+
+Use `upgrade` in place of `setup` when an existing managed schema needs the
+pending migrations. App startup only checks the installed schema and never
+creates or upgrades it.
+
 One Instance uses immutable configuration validated again by the factory before preparation:
 
 ```json
