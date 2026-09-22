@@ -3,13 +3,16 @@ use std::{fmt, rc::Rc};
 use futures::future::LocalBoxFuture;
 use lenso_kernel::{InvocationContext, NativeRequestEndpoint, NativeRequestFuture, NativeRequestHandle, PluginDependencies, RequestCapability, RuntimeFailure};
 
-use lenso_plugin_authoring::{BoundCapabilityClient, CapabilityClient, CapabilityClientMany};
+use lenso_plugin_authoring::{BoundCapabilityClient, CapabilityClient, CapabilityClientMany, CapabilityReference};
 pub const CAPABILITY_ID: &str = "lenso.jobs@1";
 pub const DESCRIPTOR_VERSION: &str = "1.0.0";
+pub const DESCRIPTOR_DIGEST: &str = "sha256:34fca9ad91952dd4eb9da844b94925cd0a54928843c803ed51e1c6ccb11d690d";
 pub const PORTABLE: bool = true;
 pub const CROSS_LANE_TRANSFER: bool = true;
 pub const JOBS_CAPABILITY_ID: &str = CAPABILITY_ID;
 pub const JOBS_DESCRIPTOR_VERSION: &str = DESCRIPTOR_VERSION;
+pub const JOBS_DESCRIPTOR_DIGEST: &str = DESCRIPTOR_DIGEST;
+pub const JOBS_CONTRACT: CapabilityReference<JobsClient> = CapabilityReference::new(CAPABILITY_ID, DESCRIPTOR_VERSION, DESCRIPTOR_DIGEST);
 
 #[doc(hidden)]
 #[macro_export]
@@ -17,11 +20,23 @@ macro_rules! __lenso_provided_jobs { () => { "{\"capability_id\":\"lenso.jobs@1\
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __lenso_required_jobs_client { () => { "{\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"one\"}" }; }
+macro_rules! __lenso_required_jobs_client {
+    () => { "{\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"one\"}" };
+    ($requirement_id:literal) => { concat!("{\"requirement_id\":", stringify!($requirement_id), ",\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"one\"}") };
+}
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __lenso_required_many_jobs_client { () => { "{\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"many\"}" }; }
+macro_rules! __lenso_required_optional_jobs_client {
+    ($requirement_id:literal) => { concat!("{\"requirement_id\":", stringify!($requirement_id), ",\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"optional\"}") };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __lenso_required_many_jobs_client {
+    () => { "{\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"many\"}" };
+    ($requirement_id:literal) => { concat!("{\"requirement_id\":", stringify!($requirement_id), ",\"capability_id\":\"lenso.jobs@1\",\"descriptor_version\":\"1.0.0\",\"cardinality\":\"many\"}") };
+}
 
 pub const CLAIM_OPERATION: &str = "claim";
 pub const COMPLETE_OPERATION: &str = "complete";
@@ -1050,6 +1065,116 @@ macro_rules! __lenso_native_lower_jobs {
     };
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __lenso_native_lower_object_jobs {
+    ($object:ty, $plugin:ty, $support:path) => {
+        use $support as __LensoNativeSupportJobs;
+        impl $crate::JobsProvider for $object {
+        fn claim(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::ClaimRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsClaim> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                let result = <$plugin>::claim(plugin.as_ref(), context, request).await;
+                $crate::__LensoIntoJobsClaimResult::__lenso_into_result(result)
+            })
+        }
+        fn complete(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::CompleteRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsComplete> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                let result = <$plugin>::complete(plugin.as_ref(), context, request).await;
+                $crate::__LensoIntoJobsCompleteResult::__lenso_into_result(result)
+            })
+        }
+        fn enqueue(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::EnqueueRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsEnqueue> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                let result = <$plugin>::enqueue(plugin.as_ref(), context, request).await;
+                $crate::__LensoIntoJobsEnqueueResult::__lenso_into_result(result)
+            })
+        }
+        fn fail(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::FailRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsFail> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                let result = <$plugin>::fail(plugin.as_ref(), context, request).await;
+                $crate::__LensoIntoJobsFailResult::__lenso_into_result(result)
+            })
+        }
+        fn inspect(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::InspectRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsInspect> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                let result = <$plugin>::inspect(plugin.as_ref(), context, request).await;
+                $crate::__LensoIntoJobsInspectResult::__lenso_into_result(result)
+            })
+        }
+        fn renew(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::RenewRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsRenew> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                let result = <$plugin>::renew(plugin.as_ref(), context, request).await;
+                $crate::__LensoIntoJobsRenewResult::__lenso_into_result(result)
+            })
+        }
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __lenso_native_lower_trait_object_jobs {
+    ($object:ty, $plugin:ty, $support:path) => {
+        use $support as __LensoNativeSupportJobs;
+        impl $crate::JobsProvider for $object {
+        fn claim(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::ClaimRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsClaim> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                <$plugin as $crate::JobsProvider>::claim(plugin.as_ref(), context, request).await
+            })
+        }
+        fn complete(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::CompleteRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsComplete> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                <$plugin as $crate::JobsProvider>::complete(plugin.as_ref(), context, request).await
+            })
+        }
+        fn enqueue(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::EnqueueRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsEnqueue> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                <$plugin as $crate::JobsProvider>::enqueue(plugin.as_ref(), context, request).await
+            })
+        }
+        fn fail(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::FailRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsFail> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                <$plugin as $crate::JobsProvider>::fail(plugin.as_ref(), context, request).await
+            })
+        }
+        fn inspect(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::InspectRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsInspect> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                <$plugin as $crate::JobsProvider>::inspect(plugin.as_ref(), context, request).await
+            })
+        }
+        fn renew(&self, context: __LensoNativeSupportJobs::InvocationContext, request: $crate::RenewRequest) -> __LensoNativeSupportJobs::NativeRequestFuture<$crate::JobsRenew> {
+            let object = self.clone();
+            ::std::boxed::Box::pin(async move {
+                let plugin = object.get()?;
+                <$plugin as $crate::JobsProvider>::renew(plugin.as_ref(), context, request).await
+            })
+        }
+        }
+    };
+}
+
 #[derive(Debug)]
 struct JobsRequestEndpoint { provider: Rc<dyn JobsProvider> }
 
@@ -1190,7 +1315,7 @@ macro_rules! __lenso_native_provide_jobs {
     }};
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct JobsClient {
     claim: NativeRequestHandle<JobsClaim>,
     complete: NativeRequestHandle<JobsComplete>,
@@ -1202,6 +1327,13 @@ pub struct JobsClient {
 impl JobsClient {
     pub fn from_dependencies(dependencies: &PluginDependencies) -> Result<Self, RuntimeFailure> {
         <Self as CapabilityClient>::from_dependencies(dependencies)
+    }
+
+    pub fn from_requirement(
+        dependencies: &PluginDependencies,
+        requirement_id: &str,
+    ) -> Result<Self, RuntimeFailure> {
+        <Self as CapabilityClient>::from_requirement(dependencies, requirement_id)
     }
 
     pub async fn claim(&self, request: ClaimRequest) -> Result<ClaimResponse, JobsClaimInvocationError> {
@@ -1295,6 +1427,14 @@ impl CapabilityClient for JobsClient {
         })
     }
 
+    fn from_requirement(
+        dependencies: &PluginDependencies,
+        requirement_id: &str,
+    ) -> Result<Self, RuntimeFailure> {
+        let dependencies = dependencies.requirement(requirement_id)?;
+        Self::from_dependencies(&dependencies)
+    }
+
     fn already_connected() -> RuntimeFailure {
         RuntimeFailure::PluginFailure {
             detail: format!("Capability Port {CAPABILITY_ID} was connected more than once"),
@@ -1324,6 +1464,14 @@ impl CapabilityClientMany for JobsClient {
                 ))
             })
             .collect()
+    }
+
+    fn many_from_requirement(
+        dependencies: &PluginDependencies,
+        requirement_id: &str,
+    ) -> Result<Vec<BoundCapabilityClient<Self>>, RuntimeFailure> {
+        let dependencies = dependencies.requirement(requirement_id)?;
+        Self::many_from_dependencies(&dependencies)
     }
 }
 

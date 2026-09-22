@@ -5,14 +5,14 @@
 It owns:
 
 - durable enqueue and scheduled availability;
-- an explicit bounded queue set per keyed Module Instance;
+- an explicit bounded queue set per keyed Plugin Instance;
 - caller-scoped idempotency keys;
 - fenced, expiring worker leases;
 - bounded retry and terminal failure policy;
 - success, failure, and inspection evidence; and
 - an operator-managed PostgreSQL schema.
 
-It deliberately does not own business payload meaning, handler implementation, external-effect idempotency, multi-step workflow orchestration, or Kernel scheduling. Removing the Module removes the job records, leases, retry policy, and operational surface without changing Kernel.
+It deliberately does not own business payload meaning, handler implementation, external-effect idempotency, multi-step workflow orchestration, or Kernel scheduling. Disabling or removing the Plugin removes its runtime surface without changing Kernel and does not implicitly delete its operator-managed PostgreSQL data.
 
 ## First tracer slice
 
@@ -36,11 +36,11 @@ being embedded in this Rust crate.
 
 ## Ownership
 
-The Jobs Plugin owns job identity, queue placement, availability time, attempt count, lease generation, lease expiry, retry schedule, terminal status, and the last stable failure code. A consuming business Module owns the schema and meaning of `payload`, selects the job kind, and makes every external effect idempotent because execution is at-least-once.
+The Jobs Plugin owns job identity, queue placement, availability time, attempt count, lease generation, lease expiry, retry schedule, terminal status, and the last stable failure code. A consuming business Plugin owns the schema and meaning of `payload`, selects the job kind, and makes every external effect idempotent because execution is at-least-once.
 
 Each keyed Jobs Instance declares its allowed queues and caller Instances. Use separate Jobs Instances when queues cross trust or operational boundaries.
 
-PostgreSQL is a private persistence Adapter. The Module uses `lenso-postgres-kit` to verify its schema during `prepare`; setup and upgrades are explicit operator workflows.
+PostgreSQL is a private persistence Adapter. The Plugin uses `lenso-postgres-kit` to verify its schema during activation; setup and upgrades are explicit operator workflows.
 
 One Instance uses immutable configuration validated again by the factory before preparation:
 
@@ -59,6 +59,16 @@ One Instance uses immutable configuration validated again by the factory before 
 ```
 
 The schema is [`crates/lenso-jobs-plugin/config.schema.json`](crates/lenso-jobs-plugin/config.schema.json). The database URL itself remains behind the explicitly bound Secrets Capability.
+
+## App adoption
+
+The package is a linked native Rust Plugin with identity `lenso.jobs` and root
+Slot `jobs`. Its generated descriptor and factory become available when a Host
+links the crate; availability does not activate an Instance. An App adopts and
+configures one Instance under `plugins/lenso.jobs/<instance>.toml`, while the
+Host-derived Plan binds its exact Secrets, producer, worker, and observer
+edges. The legacy public `JobsFactory` remains available for embedding Hosts
+that construct a registry explicitly.
 
 ## Development
 

@@ -9,16 +9,19 @@ mod storage;
 use std::{cell::RefCell, collections::BTreeSet, fmt, rc::Rc, time::Duration as StdDuration};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use lenso::{ActivateContext, DeactivateContext, Lifecycle, Port};
+use lenso_capability_jobs as jobs;
 use lenso_capability_jobs::{
     ClaimError, ClaimRequest, CompleteError, CompleteRequest, CompleteResponse, EnqueueError,
     EnqueueRequest, EnqueueResponse, FailError, FailRequest, InspectError, InspectRequest,
     JobsClaim, JobsComplete, JobsEndpoint, JobsEnqueue, JobsFail, JobsInspect, JobsProvider,
     JobsRenew, RenewError, RenewRequest, RenewResponse,
 };
+use lenso_capability_secrets as secrets;
 use lenso_capability_secrets::{ResolveRequest, SecretsClient, SecretsInvocationError};
 use lenso_kernel::{
-    DeactivateContext, InvocationContext, NativeRequestEndpoint, NativeRequestFuture, PluginFuture,
-    PluginLifecycle, PrepareContext, RequestCapability, RuntimeFailure,
+    InvocationContext, NativeRequestEndpoint, NativeRequestFuture, PluginFuture, PluginLifecycle,
+    PrepareContext, RequestCapability, RuntimeFailure,
 };
 use lenso_native_adapter::{NativePluginFactory, NativePluginFactoryContext, NativePluginInstance};
 use lenso_postgres_kit::OwnedPostgres;
@@ -29,11 +32,6 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zeroize::Zeroizing;
 
 pub use operator::{JobsOperator, JobsOperatorError};
-
-/// Package identity for the linked Rust Jobs Plugin.
-pub const PACKAGE_ID: &str = "lenso.jobs";
-/// Exact Cargo package version linked into the host.
-pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DEPENDENCY_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const MAX_PAYLOAD_BYTES: usize = 256 * 1024;
@@ -137,6 +135,14 @@ pub enum JobsConfigError {
     DuplicateCaller,
 }
 
+fn validate_config(config: &JobsConfig) -> Result<(), RuntimeFailure> {
+    config
+        .validate()
+        .map_err(|error| RuntimeFailure::InvalidResolvedPlan {
+            detail: format!("Jobs configuration is invalid: {error}"),
+        })
+}
+
 /// Native Rust factory for the durable Jobs Provider.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct JobsFactory;
@@ -180,6 +186,139 @@ impl NativePluginFactory for JobsFactory {
             vec![endpoint],
             JobsLifecycle { config, state },
         ))
+    }
+}
+
+/// Host-linked Jobs implementation used by ordinary source Apps.
+#[lenso::plugin(
+    lifecycle,
+    configuration_schema = "config.schema.json",
+    validate = validate_config
+)]
+#[derive(Clone)]
+struct LinkedJobsPlugin {
+    #[config]
+    config: JobsConfig,
+    secrets: Port<secrets::SecretsClient>,
+    state: Rc<RefCell<Option<OwnedPostgres>>>,
+}
+
+impl fmt::Debug for LinkedJobsPlugin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LinkedJobsPlugin")
+            .field("schema", &self.config.schema)
+            .field("prepared", &self.state.borrow().is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl LinkedJobsPlugin {
+    fn provider(&self) -> PostgresJobsProvider {
+        PostgresJobsProvider {
+            config: Rc::new(self.config.clone()),
+            state: self.state.clone(),
+        }
+    }
+}
+
+#[lenso::provides(jobs::Jobs)]
+impl LinkedJobsPlugin {
+    fn claim(
+        &self,
+        context: InvocationContext,
+        request: ClaimRequest,
+    ) -> NativeRequestFuture<JobsClaim> {
+        self.provider().claim(context, request)
+    }
+
+    fn complete(
+        &self,
+        context: InvocationContext,
+        request: CompleteRequest,
+    ) -> NativeRequestFuture<JobsComplete> {
+        self.provider().complete(context, request)
+    }
+
+    fn enqueue(
+        &self,
+        context: InvocationContext,
+        request: EnqueueRequest,
+    ) -> NativeRequestFuture<JobsEnqueue> {
+        self.provider().enqueue(context, request)
+    }
+
+    fn fail(
+        &self,
+        context: InvocationContext,
+        request: FailRequest,
+    ) -> NativeRequestFuture<JobsFail> {
+        self.provider().fail(context, request)
+    }
+
+    fn inspect(
+        &self,
+        context: InvocationContext,
+        request: InspectRequest,
+    ) -> NativeRequestFuture<JobsInspect> {
+        self.provider().inspect(context, request)
+    }
+
+    fn renew(
+        &self,
+        context: InvocationContext,
+        request: RenewRequest,
+    ) -> NativeRequestFuture<JobsRenew> {
+        self.provider().renew(context, request)
+    }
+}
+
+impl Lifecycle for LinkedJobsPlugin {
+    async fn activate(&self, context: ActivateContext) -> Result<(), RuntimeFailure> {
+        let dependencies = context.dependencies().clone();
+        let invocation =
+            dependencies.invocation_context_after(DEPENDENCY_TIMEOUT, context.cancellation())?;
+        let database_url = self
+            .secrets
+            .resolve_with_context(
+                invocation,
+                ResolveRequest {
+                    reference: self.config.database_url_secret.clone(),
+                },
+            )
+            .await
+            .map_err(|error| match error {
+                SecretsInvocationError::Domain(_) => RuntimeFailure::PluginFailure {
+                    detail: format!(
+                        "Jobs database secret `{}` was rejected",
+                        self.config.database_url_secret
+                    ),
+                },
+                SecretsInvocationError::Runtime(error) => error,
+            })?;
+        let database_url = Zeroizing::new(database_url.value);
+        let postgres = OwnedPostgres::prepare(
+            &database_url,
+            schema::schema_plan(self.config.schema.clone()).map_err(|error| {
+                RuntimeFailure::InvalidResolvedPlan {
+                    detail: error.to_string(),
+                }
+            })?,
+        )
+        .await
+        .map_err(|error| RuntimeFailure::PluginFailure {
+            detail: error.to_string(),
+        })?;
+        self.state.replace(Some(postgres));
+        Ok(())
+    }
+
+    async fn deactivate(&self, _context: DeactivateContext) -> Result<(), RuntimeFailure> {
+        let postgres = self.state.borrow_mut().take();
+        if let Some(postgres) = postgres {
+            postgres.pool().close().await;
+        }
+        Ok(())
     }
 }
 
@@ -669,6 +808,9 @@ fn runtime(error: impl fmt::Display) -> RuntimeFailure {
 mod tests {
     use std::{collections::BTreeMap, rc::Rc};
 
+    #[cfg(feature = "postgres-acceptance")]
+    use std::time::Duration;
+
     use futures::future::LocalBoxFuture;
     use lenso_app_plan::{
         AppComposition, CapabilityBinding, CapabilityEndpointPlan, CapabilityRequirementPlan,
@@ -683,13 +825,39 @@ mod tests {
         RESOLVE_OPERATION, ResolveError, ResolveRequest, ResolveResponse, SecretsEndpoint,
         SecretsProvider,
     };
+    #[cfg(feature = "postgres-acceptance")]
+    use lenso_kernel::ShutdownOutcome;
     use lenso_kernel::{DeterministicDriver, Kernel, NativeRequestEndpoint};
     use lenso_native_adapter::{NativePluginInstance, NativePluginRegistry};
+    #[cfg(feature = "postgres-acceptance")]
+    use lenso_runner::TokioDriver;
 
     use super::*;
 
     const PRODUCER_PACKAGE: &str = "test.jobs-producer";
     const WORKER_PACKAGE: &str = "test.jobs-worker";
+
+    #[test]
+    fn descriptor_and_linked_factory_are_generated() {
+        let descriptor: serde_json::Value = serde_json::from_str(PLUGIN_DESCRIPTOR_JSON).unwrap();
+        assert_eq!(descriptor["plugin_id"], PACKAGE_ID);
+        assert_eq!(
+            descriptor["provided_capabilities"][0]["capability_id"],
+            jobs::CAPABILITY_ID
+        );
+        assert_eq!(
+            descriptor["required_capabilities"][0]["capability_id"],
+            secrets::CAPABILITY_ID
+        );
+        assert_eq!(
+            NativePluginRegistry::new()
+                .with_linked_factories()
+                .factories()
+                .filter(|factory| factory.package_id() == PACKAGE_ID)
+                .count(),
+            1
+        );
+    }
     const SECRETS_PACKAGE: &str = "test.jobs-secrets";
 
     #[derive(Debug)]
@@ -709,7 +877,9 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct FakeSecrets;
+    struct FakeSecrets {
+        value: String,
+    }
 
     impl SecretsProvider for FakeSecrets {
         fn resolve(
@@ -719,13 +889,15 @@ mod tests {
         ) -> LocalBoxFuture<'static, Result<Result<ResolveResponse, ResolveError>, RuntimeFailure>>
         {
             Box::pin(futures::future::ready(Ok(Ok(ResolveResponse {
-                value: "postgres://unused".to_owned(),
+                value: self.value.clone(),
             }))))
         }
     }
 
     #[derive(Debug)]
-    struct FakeSecretsFactory;
+    struct FakeSecretsFactory {
+        value: String,
+    }
 
     impl NativePluginFactory for FakeSecretsFactory {
         fn package_id(&self) -> &'static str {
@@ -736,8 +908,9 @@ mod tests {
             &self,
             _context: NativePluginFactoryContext<'_>,
         ) -> Result<NativePluginInstance, RuntimeFailure> {
-            let endpoint =
-                Rc::new(SecretsEndpoint::new(FakeSecrets)) as Rc<dyn NativeRequestEndpoint>;
+            let endpoint = Rc::new(SecretsEndpoint::new(FakeSecrets {
+                value: self.value.clone(),
+            })) as Rc<dyn NativeRequestEndpoint>;
             Ok(NativePluginInstance::new(vec![endpoint]))
         }
     }
@@ -767,12 +940,12 @@ mod tests {
                 CAPABILITY_ID,
                 "1.0.0",
                 [
-                    ENQUEUE_OPERATION,
                     CLAIM_OPERATION,
-                    RENEW_OPERATION,
                     COMPLETE_OPERATION,
+                    ENQUEUE_OPERATION,
                     FAIL_OPERATION,
                     INSPECT_OPERATION,
+                    RENEW_OPERATION,
                 ],
             ))
             .with_requirement(CapabilityRequirementPlan::one(
@@ -903,10 +1076,12 @@ mod tests {
             plan(configuration),
             driver.clone(),
             NativePluginRegistry::new()
+                .with_linked_factories()
                 .with_factory(EmptyFactory(PRODUCER_PACKAGE))
                 .with_factory(EmptyFactory(WORKER_PACKAGE))
-                .with_factory(FakeSecretsFactory)
-                .with_factory(JobsFactory),
+                .with_factory(FakeSecretsFactory {
+                    value: "postgres://unused".to_owned(),
+                }),
         ));
         assert!(matches!(
             result,
@@ -928,5 +1103,74 @@ mod tests {
         .expect("App without Jobs behavior should still resolve");
         assert_eq!(remaining.plugin_instances().len(), 2);
         assert!(remaining.capability_bindings().is_empty());
+    }
+
+    #[cfg(feature = "postgres-acceptance")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn linked_factory_activates_operator_managed_postgres_and_cleans_up() {
+        use sqlx::{AssertSqlSafe, Connection};
+        use url::Url;
+
+        let Some(database_url) = std::env::var("LENSO_JOBS_TEST_DATABASE_URL").ok() else {
+            eprintln!("skipping linked PostgreSQL acceptance; test URL is unset");
+            return;
+        };
+        let parsed = Url::parse(&database_url).expect("test database URL must be valid");
+        assert!(
+            parsed
+                .path()
+                .trim_start_matches('/')
+                .starts_with("lenso_jobs_test"),
+            "acceptance requires a disposable lenso_jobs_test* database"
+        );
+        let schema = format!("jobs_linked_{}", std::process::id());
+        let drop_schema = format!("DROP SCHEMA IF EXISTS {schema} CASCADE");
+        let mut cleanup = sqlx::PgConnection::connect(&database_url).await.unwrap();
+        sqlx::query(AssertSqlSafe(drop_schema.as_str()))
+            .execute(&mut cleanup)
+            .await
+            .unwrap();
+        JobsOperator::setup(&database_url, &schema).await.unwrap();
+
+        let configuration = serde_json::to_string(
+            &JobsConfig::new(
+                schema.clone(),
+                "jobs/database",
+                30,
+                5,
+                300,
+                vec!["email".to_owned()],
+                vec!["producer".to_owned()],
+                vec!["worker".to_owned()],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let app = Kernel::start_native(
+                    plan(configuration),
+                    TokioDriver::new(),
+                    NativePluginRegistry::new()
+                        .with_linked_factories()
+                        .with_factory(EmptyFactory(PRODUCER_PACKAGE))
+                        .with_factory(EmptyFactory(WORKER_PACKAGE))
+                        .with_factory(FakeSecretsFactory {
+                            value: database_url.clone(),
+                        }),
+                )
+                .await
+                .expect("linked Jobs Plugin should activate against the managed schema");
+                assert_eq!(
+                    app.shutdown(Duration::from_secs(2)).await,
+                    ShutdownOutcome::Clean
+                );
+            })
+            .await;
+        sqlx::query(AssertSqlSafe(drop_schema.as_str()))
+            .execute(&mut cleanup)
+            .await
+            .unwrap();
     }
 }
