@@ -19,7 +19,7 @@ lenso-contract-runtime = { version = "0.2.0" }
 lenso-guest-sdk = { version = "0.4.1" }
 lenso-kernel = { version = "0.3.5" }
 lenso-plugin-authoring = { version = "0.2.0" }
-lenso-runtime-codec = { version = "0.3.4" }
+lenso-runtime-codec = { version = "0.4.2" }
 serde.workspace = true
 serde_json.workspace = true
 
