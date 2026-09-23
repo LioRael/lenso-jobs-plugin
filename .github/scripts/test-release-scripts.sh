@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE="$ROOT/.github/scripts/release-gate.sh"
 PLAN="$ROOT/.github/scripts/release-plan.sh"
+POSTCONDITION="$ROOT/.github/scripts/release-postcondition.sh"
 grep -Eq '^[[:space:]]*release_always[[:space:]]*=[[:space:]]*true[[:space:]]*$' \
   "$ROOT/release-plz.toml" || {
     printf '%s\n' 'manual PR-free release requires release_always=true' >&2
@@ -37,6 +38,13 @@ run_gate() {
   )
 }
 
+run_postcondition() {
+  (
+    cd "$test_repo"
+    env "$@" bash "$POSTCONDITION"
+  )
+}
+
 expect_failure() {
   local label="$1"
   local expected="$2"
@@ -65,6 +73,15 @@ if [[ "$args" == *"actions/workflows/ci.yml"* ]]; then
   printf '294726715\n'
 elif [[ "$args" == *"git/ref/heads/main"* ]]; then
   printf '%s\n' "$main_sha"
+elif [[ "$args" == *"git/ref/tags/"* ]]; then
+  printf '{"object":{"type":"%s","sha":"%s"}}\n' "${MOCK_TAG_TYPE:-tag}" "$sha"
+elif [[ "$args" == *"git/tags/"* ]]; then
+  printf '{"object":{"type":"commit","sha":"%s"}}\n' "${MOCK_TAG_TARGET_SHA:-$sha}"
+elif [[ "$args" == *"/releases/tags/"* ]]; then
+  tag="${args##*/}"
+  printf '{"tag_name":"%s","name":"%s","draft":%s,"prerelease":%s}\n' \
+    "${MOCK_RELEASE_TAG:-$tag}" "${MOCK_RELEASE_NAME:-Jobs $tag}" \
+    "${MOCK_RELEASE_DRAFT:-false}" "${MOCK_RELEASE_PRERELEASE:-false}"
 elif [[ "$args" == *"/jobs?"* ]]; then
   printf '[{"jobs":[{"name":"quality","head_sha":"%s","run_attempt":1,"status":"completed","conclusion":"%s"}]}]\n' \
     "$sha" "$job_conclusion"
@@ -114,6 +131,41 @@ run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
 env EXPECTED_RELEASE_SET='[]' ACTUAL_RELEASES=null bash "$PLAN"
 expect_failure "dry-run record mismatch" "unexpected release set" \
   env EXPECTED_RELEASE_SET='[]' ACTUAL_RELEASES='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' bash "$PLAN"
+
+post_expected='[{"package_name":"lenso-capability-jobs","version":"0.1.6"},{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]'
+post_actual='[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"lenso-capability-jobs@0.1.6","prs":[]},{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]'
+post_env=(
+  "${base_env[@]}"
+  "RELEASE_SHA=$current_sha"
+  "EXPECTED_RELEASE_SET=$post_expected"
+  "RELEASE_MODE=publish"
+  "RELEASE_CONFIRMATION=publish"
+  "RELEASE_ACTION_OUTCOME=success"
+  "PATH=$mock_dir:$PATH"
+  "MOCK_SHA=$current_sha"
+)
+run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual"
+run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" 'MOCK_TAG_TYPE=commit'
+expect_failure "partial live release" "does not match approved release_set" \
+  run_postcondition "${post_env[@]}" \
+    'ACTUAL_RELEASES=[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"lenso-capability-jobs@0.1.6","prs":[]}]'
+expect_failure "empty live release" "does not match approved release_set" \
+  run_postcondition "${post_env[@]}" 'ACTUAL_RELEASES=[]'
+expect_failure "failed release action" "release-plz action did not succeed" \
+  run_postcondition "${post_env[@]}" 'RELEASE_ACTION_OUTCOME=failure' 'ACTUAL_RELEASES=[]'
+expect_failure "wrong tag target" "does not point to approved source_sha" \
+  run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" \
+    'MOCK_TAG_TARGET_SHA=0000000000000000000000000000000000000000'
+expect_failure "missing registry version" "is not visible on crates.io" \
+  run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" \
+    'MOCK_UNPUBLISHED_PACKAGE=lenso-jobs-plugin' 'MOCK_UNPUBLISHED_VERSION=0.1.6'
+expect_failure "draft GitHub Release" "is not a published, non-prerelease release" \
+  run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" 'MOCK_RELEASE_DRAFT=true'
+expect_failure "wrong GitHub Release tag" "is not a published, non-prerelease release" \
+  run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" 'MOCK_RELEASE_TAG=wrong-tag'
+expect_failure "unexpected release tag" "does not match approved tag" \
+  run_postcondition "${post_env[@]}" \
+    'ACTUAL_RELEASES=[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"wrong-tag","prs":[]},{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]'
 
 git -C "$test_repo" -c user.name='Lenso fixture' -c user.email='fixture@example.invalid' \
   commit --allow-empty -m 'Advance fixture main' >/dev/null

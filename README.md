@@ -119,5 +119,9 @@ immediately before publishing. If `main` advanced after the dry-run, repeat
 candidate review and release planning for the new SHA. Publication uses
 crates.io Trusted Publishing with owner `LioRael`, repository
 `lenso-jobs-plugin`, workflow `release-plz.yml`, and no GitHub environment.
-The workflow has no registry-token fallback. Neither a local package nor the
+The workflow has no registry-token fallback. After the live action, a read-only
+postcondition compares its release records with the approved set and checks
+crates.io visibility, GitHub Releases, and tags pointing to the exact source
+SHA. A failed or partial publication must be reconciled from those receipts;
+do not blindly repeat the publish dispatch. Neither a local package nor the
 dry-run proves a registry upload, signed catalog release, or consumer adoption.
