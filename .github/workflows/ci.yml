@@ -40,3 +40,5 @@ jobs:
       - run: cargo check --locked --workspace --all-targets
       - run: cargo test --locked --workspace --features postgres-acceptance
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Check release gate and dry-run plan fixtures
+        run: bash .github/scripts/test-release-scripts.sh

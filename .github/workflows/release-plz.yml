@@ -3,74 +3,152 @@ name: Release-plz
 on:
   workflow_dispatch:
     inputs:
-      live:
-        description: Publish unpublished crate versions and create their releases
+      source_sha:
+        description: Full SHA of the landed source commit to verify and release
         required: true
-        default: false
-        type: boolean
-      confirm:
-        description: Type publish when live is enabled
+        type: string
+      release_set:
+        description: JSON array of exact package_name/version objects
+        required: true
+        default: '[]'
+        type: string
+      mode:
+        description: Read-only by default; publish requires separate authorization
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - publish
+      confirmation:
+        description: Type publish when mode is publish
         required: false
         type: string
 
 permissions: {}
 
-concurrency:
-  group: jobs-crates-release
-  cancel-in-progress: false
-
 jobs:
-  reject-unconfirmed-live-release:
-    name: Reject unconfirmed live release
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live && (inputs.confirm != 'publish' || github.ref != 'refs/heads/main') }}
+  release_gate:
+    name: Verify landed release source
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    env:
+      RELEASE_SHA: ${{ inputs.source_sha }}
+      RELEASE_SET: ${{ inputs.release_set }}
+      RELEASE_MODE: ${{ inputs.mode }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
-      - name: Explain the rejected release
-        run: |
-          echo "Live publication requires confirm=publish and ref=main." >&2
-          exit 1
+      - name: Checkout requested source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # 1.94.0
+        with:
+          toolchain: 1.94.0
+      - name: Verify source, package set, and exact CI evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/release-gate.sh
 
-  dry-run:
-    name: Release dry-run
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.live && github.ref == 'refs/heads/main' }}
+  release_plan:
+    name: Verify release-plz dry-run
+    needs: release_gate
+    if: ${{ needs.release_gate.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
+    concurrency:
+      group: jobs-release-plan-${{ inputs.source_sha }}
+      cancel-in-progress: false
+    env:
+      RELEASE_SHA: ${{ inputs.source_sha }}
+      EXPECTED_RELEASE_SET: ${{ inputs.release_set }}
     steps:
-      - &checkout
-        name: Checkout repository
+      - name: Checkout requested source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          ref: ${{ inputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - &install-rust
-        name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
+      - name: Verify checkout identity
+        run: test "$(git rev-parse HEAD)" = "${RELEASE_SHA,,}"
+      - name: Prepare release-plz branch identity
+        run: |
+          git fetch origin main --no-tags
+          git switch --force-create main "${RELEASE_SHA,,}"
+          git branch --set-upstream-to=origin/main main
+          test "$(git rev-parse HEAD)" = "${RELEASE_SHA,,}"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # 1.94.0
         with:
           toolchain: 1.94.0
-      - name: Validate the release without publishing
+      - name: Run pinned release-plz dry-run
+        id: release_plz
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
         with:
           command: release
+          config: release-plz.toml
+          version: 0.3.160
           dry_run: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Verify dry-run side effects
+        env:
+          ACTUAL_RELEASES: ${{ steps.release_plz.outputs.releases }}
+        run: bash .github/scripts/release-plan.sh
 
   release:
-    name: Publish crates
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live && inputs.confirm == 'publish' && github.ref == 'refs/heads/main' }}
+    name: Release-plz release
+    needs: [release_gate, release_plan]
+    if: >-
+      ${{ inputs.mode == 'publish' &&
+          needs.release_gate.result == 'success' &&
+          needs.release_plan.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
       pull-requests: read
       id-token: write
+    concurrency:
+      group: jobs-release-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      RELEASE_SHA: ${{ inputs.source_sha }}
+      RELEASE_SET: ${{ inputs.release_set }}
+      RELEASE_MODE: ${{ inputs.mode }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - *checkout
-      - *install-rust
-      - name: Publish unpublished crates through Trusted Publishing
+      - name: Checkout requested source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify checkout identity
+        run: test "$(git rev-parse HEAD)" = "${RELEASE_SHA,,}"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # 1.94.0
+        with:
+          toolchain: 1.94.0
+      - name: Reverify release inputs immediately before publication
+        run: bash .github/scripts/release-gate.sh
+      - name: Prepare release-plz branch identity
+        run: |
+          git fetch origin main --no-tags
+          git switch --force-create main "${RELEASE_SHA,,}"
+          git branch --set-upstream-to=origin/main main
+          test "$(git rev-parse HEAD)" = "${RELEASE_SHA,,}"
+      - name: Publish approved release set
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
         with:
           command: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          config: release-plz.toml
+          version: 0.3.160

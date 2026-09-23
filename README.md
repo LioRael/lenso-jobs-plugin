@@ -102,9 +102,20 @@ LENSO_JOBS_TEST_DATABASE_URL=postgres://... \
 
 ## Release
 
-Both workspace crates are published from `main` through
-`.github/workflows/release-plz.yml`. Run its dry-run mode first. Live
-publication additionally requires `live=true` and `confirm=publish`, and
-uses crates.io Trusted Publishing with owner `LioRael`, repository
+Both workspace crates are candidates for a separately authorized release from
+an exact landed `main` SHA. `.github/workflows/release-plz.yml` requires that
+SHA, a complete `release_set` of currently unpublished public package versions
+as observed from crates.io, and a successful `quality` job in the candidate
+push CI run for the same SHA. A read-only release-plz dry-run must pass before
+the live job can start. The current source declares
+`lenso-capability-jobs@0.1.6` and `lenso-jobs-plugin@0.1.6`; check registry
+state again when planning release instead of assuming either is published.
+
+Run the workflow from `main` with `mode=dry-run` first and inspect its result.
+Live publication is a separate manual dispatch with the same exact SHA and
+release set, `mode=publish`, and `confirmation=publish`. The live job rechecks
+source, registry and CI evidence immediately before publishing, then uses
+crates.io Trusted Publishing with owner `LioRael`, repository
 `lenso-jobs-plugin`, workflow `release-plz.yml`, and no GitHub environment.
-The workflow has no registry-token fallback.
+The workflow has no registry-token fallback. Neither a local package nor the
+dry-run proves a registry upload, signed catalog release, or consumer adoption.
