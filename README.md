@@ -114,7 +114,9 @@ state again when planning release instead of assuming either is published.
 Run the workflow from `main` with `mode=dry-run` first and inspect its result.
 Live publication is a separate manual dispatch with the same exact SHA and
 release set, `mode=publish`, and `confirmation=publish`. The live job rechecks
-source, registry and CI evidence immediately before publishing, then uses
+that the SHA is still the current remote `main`, plus registry and CI evidence,
+immediately before publishing. If `main` advanced after the dry-run, repeat
+candidate review and release planning for the new SHA. Publication uses
 crates.io Trusted Publishing with owner `LioRael`, repository
 `lenso-jobs-plugin`, workflow `release-plz.yml`, and no GitHub environment.
 The workflow has no registry-token fallback. Neither a local package nor the

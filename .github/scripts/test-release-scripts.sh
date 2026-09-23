@@ -53,12 +53,13 @@ set -euo pipefail
 
 args="$*"
 sha="${MOCK_SHA:?MOCK_SHA is required}"
+main_sha="${MOCK_MAIN_SHA:-$sha}"
 run_conclusion="${MOCK_RUN_CONCLUSION:-success}"
 job_conclusion="${MOCK_JOB_CONCLUSION:-success}"
 if [[ "$args" == *"actions/workflows/ci.yml"* ]]; then
   printf '294726715\n'
 elif [[ "$args" == *"git/ref/heads/main"* ]]; then
-  printf '%s\n' "$sha"
+  printf '%s\n' "$main_sha"
 elif [[ "$args" == *"/jobs?"* ]]; then
   printf '[{"jobs":[{"name":"quality","head_sha":"%s","run_attempt":1,"status":"completed","conclusion":"%s"}]}]\n' \
     "$sha" "$job_conclusion"
@@ -108,5 +109,14 @@ run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
 env EXPECTED_RELEASE_SET='[]' ACTUAL_RELEASES=null bash "$PLAN"
 expect_failure "dry-run record mismatch" "unexpected release set" \
   env EXPECTED_RELEASE_SET='[]' ACTUAL_RELEASES='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' bash "$PLAN"
+
+git -C "$test_repo" -c user.name='Lenso fixture' -c user.email='fixture@example.invalid' \
+  commit --allow-empty -m 'Advance fixture main' >/dev/null
+advanced_main_sha="$(git -C "$test_repo" rev-parse HEAD)"
+git -C "$test_repo" push origin HEAD:refs/heads/main >/dev/null
+git -C "$test_repo" switch --detach "$current_sha" >/dev/null
+expect_failure "advanced main" "source_sha is not the current origin/main" \
+  run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" \
+    MOCK_SHA="$current_sha" MOCK_MAIN_SHA="$advanced_main_sha"
 
 printf '%s\n' 'release gate and dry-run plan tests passed'
