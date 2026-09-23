@@ -124,11 +124,11 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 
+[[ "$RELEASE_ACTION_OUTCOME" == success ]] ||
+  fail "release-plz action did not succeed; inspect registry and tag observations before any retry"
 [[ "$output_valid" == true ]] || fail "release-plz output is missing or invalid; inspect registry and tag observations before any retry"
 [[ "$tags_match" == true ]] || fail "release-plz output includes an unapproved tag"
 [[ "$actual" == "$expected" ]] ||
   fail "release-plz output does not match approved release_set: reported ${actual}, expected ${expected}; inspect partial publication before any retry"
-[[ "$RELEASE_ACTION_OUTCOME" == success ]] ||
-  fail "release-plz action did not succeed; inspect registry and tag observations before any retry"
 [[ "$observed_ok" == true ]] || fail "registry, tag, or GitHub Release readback failed; do not claim completed publication"
 printf 'Jobs release postcondition passed for %s and %s\n' "$source_sha" "$expected"
