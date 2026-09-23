@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE="$ROOT/.github/scripts/release-gate.sh"
 PLAN="$ROOT/.github/scripts/release-plan.sh"
+grep -Eq '^[[:space:]]*release_always[[:space:]]*=[[:space:]]*true[[:space:]]*$' \
+  "$ROOT/release-plz.toml" || {
+    printf '%s\n' 'manual PR-free release requires release_always=true' >&2
+    exit 1
+  }
 current_sha="$(git -C "$ROOT" rev-parse HEAD)"
 mock_dir="$(mktemp -d)"
 test_dir="$(mktemp -d)"

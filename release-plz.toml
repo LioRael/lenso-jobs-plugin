@@ -1,5 +1,6 @@
 [workspace]
-release_always = false
+# Publication is controlled by the manual exact-SHA workflow, not a release PR.
+release_always = true
 pr_labels = ["release"]
 changelog_update = false
 git_tag_name = "{{ package }}@{{ version }}"
