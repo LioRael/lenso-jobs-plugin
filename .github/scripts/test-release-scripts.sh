@@ -5,6 +5,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE="$ROOT/.github/scripts/release-gate.sh"
 PLAN="$ROOT/.github/scripts/release-plan.sh"
 POSTCONDITION="$ROOT/.github/scripts/release-postcondition.sh"
+PUBLISH_MAIN="$ROOT/.github/scripts/reverify-publish-main.sh"
 grep -Eq '^[[:space:]]*release_always[[:space:]]*=[[:space:]]*true[[:space:]]*$' \
   "$ROOT/release-plz.toml" || {
     printf '%s\n' 'manual PR-free release requires release_always=true' >&2
@@ -28,6 +29,13 @@ for filename, selected in (
     assert workspace["git_tag_name"] == "{{ package }}@{{ version }}"
     packages = config.get("package", [])
     assert packages == ([] if selected is None else [{"name": selected, "release": True}])
+
+workflow = (root / ".github/workflows/release-plz.yml").read_text().split("\n  release:\n", 1)[1]
+prepare = workflow.index("- name: Prepare release-plz branch identity")
+reverify = workflow.index("- name: Reverify exact main immediately before publish")
+publish = workflow.index("- name: Publish approved release set")
+assert prepare < reverify < publish
+assert "run: bash .github/scripts/reverify-publish-main.sh" in workflow[reverify:publish]
 PY
 current_sha="$(git -C "$ROOT" rev-parse HEAD)"
 mock_dir="$(mktemp -d)"
@@ -61,6 +69,13 @@ run_postcondition() {
   (
     cd "$test_repo"
     env "$@" bash "$POSTCONDITION"
+  )
+}
+
+run_publish_main() {
+  (
+    cd "$test_repo"
+    env "$@" bash "$PUBLISH_MAIN"
   )
 }
 
@@ -161,6 +176,10 @@ expect_failure "registry plan mismatch" "dependency-first plugin phase" \
     MOCK_UNPUBLISHED_PACKAGE=lenso-jobs-plugin MOCK_UNPUBLISHED_VERSION=0.1.6
 
 run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha"
+run_publish_main "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha"
+expect_failure "remote main readback differs from fetch" "disagrees with remote main" \
+  run_publish_main "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" \
+    MOCK_SHA="$current_sha" MOCK_MAIN_SHA=0000000000000000000000000000000000000000
 run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
   RELEASE_SET='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
   PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" \
@@ -253,6 +272,9 @@ git -C "$test_repo" push origin HEAD:refs/heads/main >/dev/null
 git -C "$test_repo" switch --detach "$current_sha" >/dev/null
 expect_failure "advanced main" "source_sha is not the current origin/main" \
   run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" \
+    MOCK_SHA="$current_sha" MOCK_MAIN_SHA="$advanced_main_sha"
+expect_failure "main advanced after archive verification" "main advanced after release verification" \
+  run_publish_main "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" \
     MOCK_SHA="$current_sha" MOCK_MAIN_SHA="$advanced_main_sha"
 
 printf '%s\n' 'release gate and dry-run plan tests passed'

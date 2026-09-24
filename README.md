@@ -125,8 +125,9 @@ Neither gate replaces a signed App consumer test.
 For each phase, run the workflow from `main` with `mode=dry-run` first and
 inspect its result. Live publication is a separate manual dispatch with the
 same exact SHA and phase-specific release set, `mode=publish`, and
-`confirmation=publish`. The live job rechecks that the SHA is still the current
-remote `main`, plus registry and CI evidence, immediately before publishing.
+`confirmation=publish`. The live job rechecks remote `main`, registry state,
+and CI evidence before archive verification. It refreshes and compares `main`
+again directly before release-plz starts.
 If `main` advanced after the dry-run, repeat
 candidate review and release planning for the new SHA. Publication uses
 crates.io Trusted Publishing with owner `LioRael`, repository
