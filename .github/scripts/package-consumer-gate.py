@@ -21,20 +21,24 @@ class GateError(Exception):
     pass
 
 
-def source_versions():
+def source_versions(root=ROOT):
     capability = tomllib.loads(
-        (ROOT / "crates/lenso-capability-jobs/Cargo.toml").read_text()
+        (root / "crates/lenso-capability-jobs/Cargo.toml").read_text()
     )["package"]
-    plugin = tomllib.loads((ROOT / "crates/lenso-jobs-plugin/Cargo.toml").read_text())
+    plugin = tomllib.loads((root / "crates/lenso-jobs-plugin/Cargo.toml").read_text())
     dependency = plugin["dependencies"]["lenso-capability-jobs"]
+    workspace = tomllib.loads((root / "Cargo.toml").read_text())
+    patch = workspace.get("patch", {}).get("crates-io", {}).get("lenso-capability-jobs")
     if (
         capability["publish"] is not True
         or plugin["package"]["publish"] is not True
         or dependency.get("version") != capability["version"]
-        or dependency.get("path") != "../lenso-capability-jobs"
+        or "path" in dependency
+        or not isinstance(patch, dict)
+        or patch.get("path") != "crates/lenso-capability-jobs"
     ):
         raise GateError(
-            "Jobs package manifests no longer declare the expected publishable dependency"
+            "Jobs package manifests must use a registry dependency with a workspace-only local patch"
         )
     return plugin["package"]["version"], capability["version"]
 

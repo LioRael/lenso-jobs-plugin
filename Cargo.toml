@@ -34,3 +34,6 @@ module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 must_use_candidate = "allow"
+
+[patch.crates-io]
+lenso-capability-jobs = { path = "crates/lenso-capability-jobs" }

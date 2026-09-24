@@ -107,11 +107,14 @@ an exact landed `main` SHA. `.github/workflows/release-plz.yml` requires that
 SHA, the single-package `release_set` for the next dependency-first phase,
 and a successful `quality` job in the candidate push CI run for the same SHA.
 The current source declares `lenso-capability-jobs@0.1.6` and
-`lenso-jobs-plugin@0.1.6`. When both are unpublished, only the Capability
-phase is allowed. After its exact version is visible on crates.io, run the
-Plugin phase separately. The workflow selects a config that enables only the
-approved package. It refuses a combined release set or a Plugin release before
-Capability visibility.
+`lenso-jobs-plugin@0.1.7`. The Plugin declares a registry-version dependency,
+while the workspace-only `[patch.crates-io]` selects the sibling Capability for
+local development. Cargo omits that workspace patch from the Plugin archive and
+records the registry-sourced Capability in its packaged lock. When both are
+unpublished, only the Capability phase is allowed. After its exact version is
+visible on crates.io, run the Plugin phase separately. The workflow selects a
+config that enables only the approved package. It refuses a combined release
+set or a Plugin release before Capability visibility.
 
 Before the Plugin dry-run and again before publication, the workflow packages
 the Jobs Plugin and checks the archive's `Cargo.lock` for a registry-sourced,

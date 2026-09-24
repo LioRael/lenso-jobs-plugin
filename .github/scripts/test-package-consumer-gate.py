@@ -17,10 +17,10 @@ class PackageConsumerGateTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.package = self.root / "lenso-jobs-plugin-0.1.6"
+        self.package = self.root / "lenso-jobs-plugin-0.1.7"
         self.package.mkdir()
         (self.package / "Cargo.toml").write_text(
-            '[package]\nname = "lenso-jobs-plugin"\nversion = "0.1.6"\n'
+            '[package]\nname = "lenso-jobs-plugin"\nversion = "0.1.7"\n'
             '[dependencies.lenso-capability-jobs]\nversion = "0.1.6"\n'
         )
         (self.package / "Cargo.lock").write_text(
@@ -29,7 +29,7 @@ class PackageConsumerGateTests(unittest.TestCase):
             f'source = "{GATE.REGISTRY_SOURCE}"\n'
             f'checksum = "{"a" * 64}"\n'
         )
-        self.archive = self.root / "lenso-jobs-plugin-0.1.6.crate"
+        self.archive = self.root / "lenso-jobs-plugin-0.1.7.crate"
 
     def pack(self):
         with tarfile.open(self.archive, "w:gz") as package:
@@ -39,7 +39,7 @@ class PackageConsumerGateTests(unittest.TestCase):
     def metadata(package_dir):
         return {
             "packages": [
-                {"name": "lenso-jobs-plugin", "version": "0.1.6", "source": None},
+                {"name": "lenso-jobs-plugin", "version": "0.1.7", "source": None},
                 {
                     "name": "lenso-capability-jobs",
                     "version": "0.1.6",
@@ -51,7 +51,7 @@ class PackageConsumerGateTests(unittest.TestCase):
     def verify(self, metadata_runner=None):
         GATE.verify_archive(
             self.archive,
-            "0.1.6",
+            "0.1.7",
             "0.1.6",
             metadata_runner or self.metadata,
         )
@@ -119,6 +119,27 @@ class PackageConsumerGateTests(unittest.TestCase):
         self.pack()
         with self.assertRaisesRegex(GATE.GateError, "path dependency"):
             self.verify()
+
+    def test_registry_dependency_keeps_local_workspace_patch(self):
+        capability = self.root / "crates" / "lenso-capability-jobs"
+        plugin = self.root / "crates" / "lenso-jobs-plugin"
+        capability.mkdir(parents=True)
+        plugin.mkdir()
+        (capability / "Cargo.toml").write_text(
+            '[package]\nname = "lenso-capability-jobs"\nversion = "0.1.6"\npublish = true\n'
+        )
+        (plugin / "Cargo.toml").write_text(
+            '[package]\nname = "lenso-jobs-plugin"\nversion = "0.1.7"\npublish = true\n'
+            '[dependencies.lenso-capability-jobs]\nversion = "0.1.6"\n'
+        )
+        (self.root / "Cargo.toml").write_text(
+            '[patch.crates-io]\n'
+            'lenso-capability-jobs = { path = "crates/lenso-capability-jobs" }\n'
+        )
+        self.assertEqual(GATE.source_versions(self.root), ("0.1.7", "0.1.6"))
+
+    def test_repository_manifests_satisfy_package_gate(self):
+        self.assertEqual(GATE.source_versions(), ("0.1.7", "0.1.6"))
 
 
 if __name__ == "__main__":
