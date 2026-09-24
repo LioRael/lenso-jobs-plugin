@@ -42,3 +42,5 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Check release gate and dry-run plan fixtures
         run: bash .github/scripts/test-release-scripts.sh
+      - name: Check packaged-consumer gate fixtures
+        run: python3 .github/scripts/test-package-consumer-gate.py

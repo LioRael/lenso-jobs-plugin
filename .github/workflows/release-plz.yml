@@ -31,6 +31,9 @@ jobs:
   release_gate:
     name: Verify landed release source
     runs-on: ubuntu-24.04
+    outputs:
+      release_phase: ${{ steps.verify.outputs.release_phase }}
+      release_config: ${{ steps.verify.outputs.release_config }}
     permissions:
       actions: read
       contents: read
@@ -51,6 +54,7 @@ jobs:
         with:
           toolchain: 1.94.0
       - name: Verify source, package set, and exact CI evidence
+        id: verify
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/scripts/release-gate.sh
@@ -88,12 +92,15 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # 1.94.0
         with:
           toolchain: 1.94.0
+      - name: Verify packaged Jobs registry-only consumer
+        if: ${{ needs.release_gate.outputs.release_phase == 'plugin' }}
+        run: python3 .github/scripts/package-consumer-gate.py
       - name: Run pinned release-plz dry-run
         id: release_plz
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
         with:
           command: release
-          config: release-plz.toml
+          config: ${{ needs.release_gate.outputs.release_config }}
           version: 0.3.160
           dry_run: true
         env:
@@ -139,7 +146,11 @@ jobs:
         with:
           toolchain: 1.94.0
       - name: Reverify release inputs immediately before publication
+        id: reverify
         run: bash .github/scripts/release-gate.sh
+      - name: Reverify packaged Jobs registry-only consumer
+        if: ${{ steps.reverify.outputs.release_phase == 'plugin' }}
+        run: python3 .github/scripts/package-consumer-gate.py --no-verify
       - name: Prepare release-plz branch identity
         run: |
           git fetch origin main --no-tags
@@ -151,7 +162,7 @@ jobs:
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
         with:
           command: release
-          config: release-plz.toml
+          config: ${{ steps.reverify.outputs.release_config }}
           version: 0.3.160
       - name: Reconcile published packages and tags
         if: ${{ !cancelled() && steps.release_plz.outcome != 'skipped' }}

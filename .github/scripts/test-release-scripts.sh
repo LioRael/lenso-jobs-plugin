@@ -10,6 +10,25 @@ grep -Eq '^[[:space:]]*release_always[[:space:]]*=[[:space:]]*true[[:space:]]*$'
     printf '%s\n' 'manual PR-free release requires release_always=true' >&2
     exit 1
   }
+python3 - "$ROOT" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+root = pathlib.Path(sys.argv[1])
+for filename, selected in (
+    ("release-plz.toml", None),
+    ("release-plz-capability.toml", "lenso-capability-jobs"),
+    ("release-plz-plugin.toml", "lenso-jobs-plugin"),
+):
+    config = tomllib.loads((root / filename).read_text())
+    workspace = config["workspace"]
+    assert workspace["release_always"] is True
+    assert workspace["release"] is False
+    assert workspace["git_tag_name"] == "{{ package }}@{{ version }}"
+    packages = config.get("package", [])
+    assert packages == ([] if selected is None else [{"name": selected, "release": True}])
+PY
 current_sha="$(git -C "$ROOT" rev-parse HEAD)"
 mock_dir="$(mktemp -d)"
 test_dir="$(mktemp -d)"
@@ -95,13 +114,34 @@ fi
 EOF
 cat >"$mock_dir/curl" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$*" == *"/download"* ]]; then
+  previous=''
+  for arg in "$@"; do
+    if [[ "$previous" == '--output' ]]; then
+      printf 'mock archive\n' >"$arg"
+      exit 0
+    fi
+    previous="$arg"
+  done
+  exit 2
+fi
 if [[ "$*" == *"/crates/${MOCK_UNPUBLISHED_PACKAGE:-none}/${MOCK_UNPUBLISHED_VERSION:-none}"* ]]; then
   printf '404\n'
 else
   printf '%s\n' "${MOCK_CURL_STATUS:-200}"
 fi
 EOF
-chmod +x "$mock_dir/gh" "$mock_dir/curl"
+cat >"$mock_dir/python3" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"package-consumer-gate.py --archive"* ]]; then
+  if [[ "${MOCK_PACKAGE_GATE_FAIL:-false}" == true ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+exec "${REAL_PYTHON3:?}" "$@"
+EOF
+chmod +x "$mock_dir/gh" "$mock_dir/curl" "$mock_dir/python3"
 
 expect_failure "invalid full SHA" "full 40-character" \
   run_gate "${base_env[@]}" RELEASE_SHA=not-a-sha
@@ -116,7 +156,7 @@ expect_failure "obsolete candidate namespace" "no successful candidate push CI r
 expect_failure "unexpected package" "unapproved Jobs package" \
   run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" \
     RELEASE_SET='[{"package_name":"lenso-other-plugin","version":"0.1.0"}]'
-expect_failure "registry plan mismatch" "release_set does not match" \
+expect_failure "registry plan mismatch" "dependency-first plugin phase" \
   run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" \
     MOCK_UNPUBLISHED_PACKAGE=lenso-jobs-plugin MOCK_UNPUBLISHED_VERSION=0.1.6
 
@@ -125,15 +165,41 @@ run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
   RELEASE_SET='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
   PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" \
   MOCK_UNPUBLISHED_PACKAGE=lenso-jobs-plugin MOCK_UNPUBLISHED_VERSION=0.1.6
+capability_phase="$(run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
+  RELEASE_SET='[{"package_name":"lenso-capability-jobs","version":"0.1.6"}]' \
+  PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" MOCK_CURL_STATUS=404)"
+[[ "$capability_phase" == *'release_phase: capability (release-plz-capability.toml)'* ]]
+gate_output="$test_dir/gate-output"
 run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
-  RELEASE_SET='[{"package_name":"lenso-capability-jobs","version":"0.1.6"},{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
-  PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" MOCK_CURL_STATUS=404
+  RELEASE_SET='[{"package_name":"lenso-capability-jobs","version":"0.1.6"}]' \
+  PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" MOCK_CURL_STATUS=404 \
+  GITHUB_OUTPUT="$gate_output" >/dev/null
+grep -Fxq 'release_phase=capability' "$gate_output"
+grep -Fxq 'release_config=release-plz-capability.toml' "$gate_output"
+plugin_phase="$(run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
+  RELEASE_SET='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
+  PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" \
+  MOCK_UNPUBLISHED_PACKAGE=lenso-jobs-plugin MOCK_UNPUBLISHED_VERSION=0.1.6)"
+[[ "$plugin_phase" == *'release_phase: plugin (release-plz-plugin.toml)'* ]]
+expect_failure "combined unpublished set" "dependency-first capability phase" \
+  run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
+    RELEASE_SET='[{"package_name":"lenso-capability-jobs","version":"0.1.6"},{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
+    PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" MOCK_CURL_STATUS=404
+expect_failure "plugin before capability" "dependency-first capability phase" \
+  run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
+    RELEASE_SET='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
+    PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" MOCK_CURL_STATUS=404
+expect_failure "plugin visible without capability" "visible while its Capability version is missing" \
+  run_gate "${base_env[@]}" RELEASE_SHA="$current_sha" \
+    RELEASE_SET='[{"package_name":"lenso-capability-jobs","version":"0.1.6"}]' \
+    PATH="$mock_dir:$PATH" MOCK_SHA="$current_sha" \
+    MOCK_UNPUBLISHED_PACKAGE=lenso-capability-jobs MOCK_UNPUBLISHED_VERSION=0.1.6
 env EXPECTED_RELEASE_SET='[]' ACTUAL_RELEASES=null bash "$PLAN"
 expect_failure "dry-run record mismatch" "unexpected release set" \
   env EXPECTED_RELEASE_SET='[]' ACTUAL_RELEASES='[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' bash "$PLAN"
 
-post_expected='[{"package_name":"lenso-capability-jobs","version":"0.1.6"},{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]'
-post_actual='[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"lenso-capability-jobs@0.1.6","prs":[]},{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]'
+post_expected='[{"package_name":"lenso-capability-jobs","version":"0.1.6"}]'
+post_actual='[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"lenso-capability-jobs@0.1.6","prs":[]}]'
 post_env=(
   "${base_env[@]}"
   "RELEASE_SHA=$current_sha"
@@ -143,12 +209,25 @@ post_env=(
   "RELEASE_ACTION_OUTCOME=success"
   "PATH=$mock_dir:$PATH"
   "MOCK_SHA=$current_sha"
+  "REAL_PYTHON3=$(command -v python3)"
 )
 run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual"
 run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" 'MOCK_TAG_TYPE=commit'
-expect_failure "partial live release" "does not match approved release_set" \
+run_postcondition "${post_env[@]}" \
+  'EXPECTED_RELEASE_SET=[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
+  'ACTUAL_RELEASES=[{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]'
+expect_failure "published archive consumer failure" "published Jobs archive failed" \
   run_postcondition "${post_env[@]}" \
-    'ACTUAL_RELEASES=[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"lenso-capability-jobs@0.1.6","prs":[]}]'
+    'EXPECTED_RELEASE_SET=[{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
+    'ACTUAL_RELEASES=[{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]' \
+    'MOCK_PACKAGE_GATE_FAIL=true'
+expect_failure "unapproved combined release" "one dependency-first release phase" \
+  run_postcondition "${post_env[@]}" \
+    'EXPECTED_RELEASE_SET=[{"package_name":"lenso-capability-jobs","version":"0.1.6"},{"package_name":"lenso-jobs-plugin","version":"0.1.6"}]' \
+    "ACTUAL_RELEASES=$post_actual"
+expect_failure "unapproved extra release" "does not match approved release_set" \
+  run_postcondition "${post_env[@]}" \
+    'ACTUAL_RELEASES=[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"lenso-capability-jobs@0.1.6","prs":[]},{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]'
 expect_failure "empty live release" "does not match approved release_set" \
   run_postcondition "${post_env[@]}" 'ACTUAL_RELEASES=[]'
 expect_failure "failed release action" "release-plz action did not succeed" \
@@ -158,14 +237,14 @@ expect_failure "wrong tag target" "does not point to approved source_sha" \
     'MOCK_TAG_TARGET_SHA=0000000000000000000000000000000000000000'
 expect_failure "missing registry version" "is not visible on crates.io" \
   run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" \
-    'MOCK_UNPUBLISHED_PACKAGE=lenso-jobs-plugin' 'MOCK_UNPUBLISHED_VERSION=0.1.6'
+    'MOCK_UNPUBLISHED_PACKAGE=lenso-capability-jobs' 'MOCK_UNPUBLISHED_VERSION=0.1.6'
 expect_failure "draft GitHub Release" "is not a published, non-prerelease release" \
   run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" 'MOCK_RELEASE_DRAFT=true'
 expect_failure "wrong GitHub Release tag" "is not a published, non-prerelease release" \
   run_postcondition "${post_env[@]}" "ACTUAL_RELEASES=$post_actual" 'MOCK_RELEASE_TAG=wrong-tag'
 expect_failure "unexpected release tag" "does not match approved tag" \
   run_postcondition "${post_env[@]}" \
-    'ACTUAL_RELEASES=[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"wrong-tag","prs":[]},{"package_name":"lenso-jobs-plugin","version":"0.1.6","tag":"lenso-jobs-plugin@0.1.6","prs":[]}]'
+    'ACTUAL_RELEASES=[{"package_name":"lenso-capability-jobs","version":"0.1.6","tag":"wrong-tag","prs":[]}]'
 
 git -C "$test_repo" -c user.name='Lenso fixture' -c user.email='fixture@example.invalid' \
   commit --allow-empty -m 'Advance fixture main' >/dev/null

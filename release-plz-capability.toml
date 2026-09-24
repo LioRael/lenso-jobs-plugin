@@ -1,7 +1,9 @@
 [workspace]
-# The manual workflow selects a single-package config after its registry gate.
 release_always = true
 release = false
-pr_labels = ["release"]
 changelog_update = false
 git_tag_name = "{{ package }}@{{ version }}"
+
+[[package]]
+name = "lenso-capability-jobs"
+release = true

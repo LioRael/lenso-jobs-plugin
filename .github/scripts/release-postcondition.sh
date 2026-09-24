@@ -23,6 +23,13 @@ source_sha="${RELEASE_SHA,,}"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || fail "source_sha must be a full commit SHA"
 expected="$(release_set_canonical "$EXPECTED_RELEASE_SET")" || fail "invalid approved release_set"
 [[ "$expected" != "[]" ]] || fail "approved release_set must be non-empty"
+[[ "$(jq 'length' <<<"$expected")" == 1 ]] ||
+  fail "approved release_set must contain one dependency-first release phase"
+package_name="$(jq -r '.[0].package_name' <<<"$expected")"
+case "$package_name" in
+  lenso-capability-jobs|lenso-jobs-plugin) ;;
+  *) fail "approved release_set contains an unapproved Jobs package" ;;
+esac
 
 actual='[]'
 output_valid=true
@@ -74,6 +81,20 @@ while IFS=$'\t' read -r package version; do
   if [[ "$registry_status" != 200 ]]; then
     printf '%s@%s is not visible on crates.io (HTTP %s)\n' "$package" "$version" "$registry_status" >&2
     observed_ok=false
+  elif [[ "$package" == "lenso-jobs-plugin" ]]; then
+    archive_file="$(mktemp)"
+    if ! curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+      --max-time 30 \
+      --user-agent 'Lenso-release-postcondition/1.0 (https://github.com/LioRael/lenso-jobs-plugin)' \
+      --output "$archive_file" \
+      "https://crates.io/api/v1/crates/${package}/${version}/download"; then
+      printf 'could not download the published Jobs archive\n' >&2
+      observed_ok=false
+    elif ! python3 "$SCRIPT_DIR/package-consumer-gate.py" --archive "$archive_file"; then
+      printf 'published Jobs archive failed registry-only locked consumption\n' >&2
+      observed_ok=false
+    fi
+    rm -f -- "$archive_file"
   fi
 
   tag="${package}@${version}"

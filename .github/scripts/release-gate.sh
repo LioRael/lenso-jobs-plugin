@@ -109,8 +109,31 @@ while IFS=$'\t' read -r package version manifest; do
   esac
 done < <(jq -r '.packages[] | [.name, .version, .manifest_path] | @tsv' <<<"$metadata")
 registry_release_set="$(jq -c 'sort_by(.package_name)' <<<"$registry_release_set")"
-[[ "$registry_release_set" == "$release_set" ]] ||
-  fail "release_set does not match the read-only crates.io plan: expected ${release_set}, registry plan ${registry_release_set}"
+capability_version="$(jq -r '.packages[] | select(.name == "lenso-capability-jobs") | .version' <<<"$metadata")"
+plugin_version="$(jq -r '.packages[] | select(.name == "lenso-jobs-plugin") | .version' <<<"$metadata")"
+[[ -n "$capability_version" && -n "$plugin_version" ]] ||
+  fail "Jobs workspace must contain both publishable packages"
+capability_unpublished="$(jq -r 'any(.[]; .package_name == "lenso-capability-jobs")' <<<"$registry_release_set")"
+plugin_unpublished="$(jq -r 'any(.[]; .package_name == "lenso-jobs-plugin")' <<<"$registry_release_set")"
+if [[ "$capability_unpublished" == true ]]; then
+  [[ "$plugin_unpublished" == true ]] ||
+    fail "Jobs Plugin is visible while its Capability version is missing"
+  release_phase=capability
+  release_config=release-plz-capability.toml
+  staged_set="$(jq -cn --arg version "$capability_version" \
+    '[{package_name:"lenso-capability-jobs",version:$version}]')"
+elif [[ "$plugin_unpublished" == true ]]; then
+  release_phase=plugin
+  release_config=release-plz-plugin.toml
+  staged_set="$(jq -cn --arg version "$plugin_version" \
+    '[{package_name:"lenso-jobs-plugin",version:$version}]')"
+else
+  release_phase=none
+  release_config=release-plz.toml
+  staged_set='[]'
+fi
+[[ "$release_set" == "$staged_set" ]] ||
+  fail "release_set does not match dependency-first ${release_phase} phase: approved ${release_set}, required ${staged_set}, registry plan ${registry_release_set}"
 
 workflow_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml" --jq '.id')" ||
   fail "could not read the CI workflow identity"
@@ -180,6 +203,7 @@ printf 'Release gate passed for %s\n' "$source_sha"
 printf 'origin/main: %s\n' "$main_sha"
 printf 'CI run: %s (attempt %s)\n' "$ci_run_url" "$ci_run_attempt"
 printf 'release_set: %s\n' "$release_set"
+printf 'release_phase: %s (%s)\n' "$release_phase" "$release_config"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     printf 'source_sha=%s\n' "$source_sha"
@@ -188,6 +212,8 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'ci_run_url=%s\n' "$ci_run_url"
     printf 'ci_run_attempt=%s\n' "$ci_run_attempt"
     printf 'release_set=%s\n' "$release_set"
+    printf 'release_phase=%s\n' "$release_phase"
+    printf 'release_config=%s\n' "$release_config"
   } >>"$GITHUB_OUTPUT"
 fi
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -198,5 +224,6 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf -- '- CI: [%s](%s), attempt `%s`, job `quality` successful\n' \
       "$ci_run_id" "$ci_run_url" "$ci_run_attempt"
     printf -- '- Registry release plan: `%s`\n' "$registry_release_set"
+    printf -- '- Dependency-first phase: `%s` via `%s`\n' "$release_phase" "$release_config"
   } >>"$GITHUB_STEP_SUMMARY"
 fi

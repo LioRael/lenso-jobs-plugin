@@ -104,24 +104,37 @@ LENSO_JOBS_TEST_DATABASE_URL=postgres://... \
 
 Both workspace crates are candidates for a separately authorized release from
 an exact landed `main` SHA. `.github/workflows/release-plz.yml` requires that
-SHA, a complete `release_set` of currently unpublished public package versions
-as observed from crates.io, and a successful `quality` job in the candidate
-push CI run for the same SHA. A read-only release-plz dry-run must pass before
-the live job can start. The current source declares
-`lenso-capability-jobs@0.1.6` and `lenso-jobs-plugin@0.1.6`; check registry
-state again when planning release instead of assuming either is published.
+SHA, the single-package `release_set` for the next dependency-first phase,
+and a successful `quality` job in the candidate push CI run for the same SHA.
+The current source declares `lenso-capability-jobs@0.1.6` and
+`lenso-jobs-plugin@0.1.6`. When both are unpublished, only the Capability
+phase is allowed. After its exact version is visible on crates.io, run the
+Plugin phase separately. The workflow selects a config that enables only the
+approved package. It refuses a combined release set or a Plugin release before
+Capability visibility.
 
-Run the workflow from `main` with `mode=dry-run` first and inspect its result.
-Live publication is a separate manual dispatch with the same exact SHA and
-release set, `mode=publish`, and `confirmation=publish`. The live job rechecks
-that the SHA is still the current remote `main`, plus registry and CI evidence,
-immediately before publishing. If `main` advanced after the dry-run, repeat
+Before the Plugin dry-run and again before publication, the workflow packages
+the Jobs Plugin and checks the archive's `Cargo.lock` for a registry-sourced,
+checksummed Capability. It then extracts that exact archive and runs
+`cargo metadata --locked` without allowing lock changes. The same check can
+be run locally after the Capability is available with
+`python3 .github/scripts/package-consumer-gate.py`. The postcondition downloads
+the published Plugin archive and repeats the check on those registry bytes.
+Neither gate replaces a signed App consumer test.
+
+For each phase, run the workflow from `main` with `mode=dry-run` first and
+inspect its result. Live publication is a separate manual dispatch with the
+same exact SHA and phase-specific release set, `mode=publish`, and
+`confirmation=publish`. The live job rechecks that the SHA is still the current
+remote `main`, plus registry and CI evidence, immediately before publishing.
+If `main` advanced after the dry-run, repeat
 candidate review and release planning for the new SHA. Publication uses
 crates.io Trusted Publishing with owner `LioRael`, repository
 `lenso-jobs-plugin`, workflow `release-plz.yml`, and no GitHub environment.
 The workflow has no registry-token fallback. After the live action, a read-only
 postcondition compares its release records with the approved set and checks
 crates.io visibility, GitHub Releases, and tags pointing to the exact source
-SHA. A failed or partial publication must be reconciled from those receipts;
-do not blindly repeat the publish dispatch. Neither a local package nor the
+SHA. For the Plugin phase it also checks the downloaded `.crate`. A failed or
+partial publication must be reconciled from those receipts; do not blindly
+repeat the publish dispatch. Neither a local package nor the
 dry-run proves a registry upload, signed catalog release, or consumer adoption.
