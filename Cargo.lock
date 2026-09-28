@@ -669,7 +669,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 name = "lenso"
 version = "0.5.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df65f1e5a00ad89e0608c9e6c1d695eb67ca00e9e39ae787f77c5b418e9c9b41"
+checksum = "46620d37d1c40f62f33f26b28a209fbcbffb2dd9cbefb5e5ab269ce964c52876"
 dependencies = [
  "futures",
  "lenso-kernel",
@@ -683,7 +683,7 @@ dependencies = [
 name = "lenso-app-plan"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bd05bd0a155976d65f57c100ccd3d7b7a5edc55ed78a4cbcd4e921fc188af4d"
+checksum = "0fa1393e57d198ae68a8f5c4bb5a16d4eaa2267116be8de34e920a55fcf28c7e"
 dependencies = [
  "serde",
  "serde_json",
@@ -827,7 +827,7 @@ dependencies = [
 name = "lenso-native-adapter"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08b0bb08862057aff52502fd3af6508fbcb65b1066896d576f696add534c825b"
+checksum = "a74e740da05247c1e099883ff5b174f5761d8e21883641967b03793756238b1e"
 dependencies = [
  "futures",
  "inventory",
@@ -843,7 +843,7 @@ dependencies = [
 name = "lenso-native-adapter-macros"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abc6d918235324c599e6dfee88825e8ca5d54e7cdb236451df5749e5a4ff3eaa"
+checksum = "00048fb5e9732dbfc01547f50cfdfc8129ce647fa7d523c7b7d6ad1d1980cdac"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -874,7 +874,7 @@ dependencies = [
 name = "lenso-runner"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6edd246064e863a4e2bf447ea8d164e3603bba3d3f148419b5cf4ba61cb14971"
+checksum = "e881f8aa5bdf5a687b4cc7b89651ba89dfc72de698ddc0af79fd4de520a45992"
 dependencies = [
  "cpu-time",
  "futures",
@@ -887,7 +887,7 @@ dependencies = [
 name = "lenso-runtime-codec"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbde6c8bc32a92ec055f04a6e36a6792f0e22714aebe4654ee3651b446687b1a"
+checksum = "445375a6bf8a20f9cc7798e2bbe1414f6fcc711781c31435ea8498ef24d18834"
 dependencies = [
  "futures",
  "hex",
